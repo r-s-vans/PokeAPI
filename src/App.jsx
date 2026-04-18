@@ -6,68 +6,75 @@ function App() {
   const [selectedPokemon, setSelectedPokemon] = useState(null);
   const [typeEff, setTypeEff] = useState({});
   const [loading, setLoading] = useState(true);
-  const [typeJP, setTypeJP] = useState({}); // タイプの英語名→日本語名変換マップ
-
+  const [typeJP, setTypeJP] = useState({}); 
 
   useEffect(() => {
-  const initApp = async () => {
-    try {
-      setLoading(true);
-      //全ポケモンのリストを取得
-      const res = await fetch("https://pokeapi.co/api/v2/pokemon?limit=151");
-      const data = await res.json();
+    const initApp = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch("https://pokeapi.co/api/v2/pokemon?limit=151");
+        const data = await res.json();
 
-      // 日本語名のリストを作成（エラーハンドリング付き）
-      const listWithJP = await Promise.all(
-        data.results.map(async (p) => {
+        const listWithJP = await Promise.all(
+          data.results.map(async (p) => {
+            try {
+              const detailRes = await fetch(p.url);
+              const detail = await detailRes.json();
+              const speciesRes = await fetch(detail.species.url);
+              const species = await speciesRes.json();
+              const nameObj = species.names.find(n => n.language.name === "ja-Hrkt" || n.language.name === "ja");
+              const jaName = nameObj ? nameObj.name : p.name;
+              return { ...p, jaName, id: detail.id };
+            } catch (e) {
+              return { ...p, jaName: p.name, id: 0 };
+            }
+          })
+        );
+        setAllPokemon(listWithJP.filter(p => p.id !== 0));
+
+        const tRes = await fetch("https://pokeapi.co/api/v2/type");
+        const tData = await tRes.json();
+        const tMap = {};
+        await Promise.all(tData.results.map(async (t) => {
+          if (t.name === "shadow" || t.name === "unknown") return;
           try {
-            const detailRes = await fetch(p.url);
-            const detail = await detailRes.json();
-            const speciesRes = await fetch(detail.species.url);
-            const species = await speciesRes.json();
-            
-            // 日本語名を探す（見つからない場合は英語名を代入）
-            const nameObj = species.names.find(n => n.language.name === "ja-Hrkt" || n.language.name === "ja");
-            const jaName = nameObj ? nameObj.name : p.name;
-            
-            return { ...p, jaName, id: detail.id };
+            const res = await fetch(t.url);
+            const data = await res.json();
+            const typeNameObj = data.names.find(n => n.language.name === "ja-Hrkt" || n.language.name === "ja");
+            tMap[t.name] = typeNameObj ? typeNameObj.name : t.name;
           } catch (e) {
-            // 個別のポケモンでエラーが出ても全体を止めない
-            return { ...p, jaName: p.name, id: 0 };
+            tMap[t.name] = t.name;
           }
-        })
-      );
-      setAllPokemon(listWithJP.filter(p => p.id !== 0));
+        }));
+        setTypeJP(tMap);
+      } catch (e) {
+        console.error("初期化エラー:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    initApp();
+  }, []);
 
-      // 3. タイプ名の日本語マップを作成（エラーハンドリング付き）
-      const tRes = await fetch("https://pokeapi.co/api/v2/type");
-      const tData = await tRes.json();
-      const tMap = {};
+  // --- 【ここから復活させたコード】 ---
+  const handleSelect = async (url) => {
+    if (!url) return;
+    try {
+      const res = await fetch(url);
+      const pokemon = await res.json();
       
-      await Promise.all(tData.results.map(async (t) => {
-        if (t.name === "shadow" || t.name === "unknown") return;
-        try {
-          const res = await fetch(t.url);
-          const data = await res.json();
-          const typeNameObj = data.names.find(n => n.language.name === "ja-Hrkt" || n.language.name === "ja");
-          tMap[t.name] = typeNameObj ? typeNameObj.name : t.name;
-        } catch (e) {
-          tMap[t.name] = t.name; // エラー時は英語名のまま
-        }
-      }));
-      setTypeJP(tMap);
-
-    } catch (e) {
-      console.error("初期化エラー:", e);
-    } finally {
-      setLoading(false);
+      const speciesRes = await fetch(pokemon.species.url);
+      const speciesData = await speciesRes.json();
+      const nameObj = speciesData.names.find(n => n.language.name === "ja-Hrkt" || n.language.name === "ja");
+      pokemon.jaName = nameObj ? nameObj.name : pokemon.name;
+      
+      setSelectedPokemon(pokemon);
+      calculateEffectiveness(pokemon.types);
+    } catch (error) {
+      console.error("ポケモン選択時のエラー:", error);
     }
   };
-  initApp();
-}, []);
- 
- 
-  
+  // --- 【ここまで】 ---
 
   const calculateEffectiveness = async (types) => {
     const effectiveness = {};
@@ -128,7 +135,6 @@ function App() {
   );
 }
 
-// 倍率ごとの表示用サブコンポーネント
 const EffectSection = ({ title, val, data, jp }) => {
   const filtered = Object.entries(data).filter(([_, m]) => m === val);
   if (filtered.length === 0) return null;
